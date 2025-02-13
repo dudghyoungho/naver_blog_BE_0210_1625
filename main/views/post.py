@@ -131,34 +131,42 @@ def parse_json_field(field):
 
 
 class PostCreateView(CreateAPIView):
+    """
+    게시물 생성 뷰
+    - 사용자의 CustomUser 모델에 등록된 카테고리 중에서만 선택 가능
+    """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
     serializer_class = PostSerializer
 
     @swagger_auto_schema(
         operation_summary="게시물 생성",
-        operation_description="카테고리와 주제를 포함하여 게시물을 생성합니다.",
+        operation_description="사용자의 카테고리 중에서 선택해 게시물을 생성합니다.",
         responses={201: PostSerializer()},
     )
     def post(self, request, *args, **kwargs):
-        category_name = request.data.get('category')
-        subject = request.data.get('subject', '주제 선택 안 함')
+        user = request.user
         title = request.data.get('title')
+        category_name = request.data.get('category_name')  # 카테고리 이름으로 선택
+        subject = request.data.get('subject', '주제 선택 안 함')
         content = request.data.get('content', '')
 
+        # ✅ 제목 필수 확인
         if not title:
             return Response({"error": "제목은 필수 항목입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not category_name:
-            return Response({"error": "카테고리는 필수 항목입니다."}, status=status.HTTP_400_BAD_REQUEST)
+        # ✅ 카테고리 선택: 사용자의 CustomUser.categories에서만 선택 가능
+        if category_name:
+            try:
+                category = user.categories.get(name=category_name)
+            except Category.DoesNotExist:
+                return Response({"error": "유효하지 않은 카테고리입니다."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            category = user.categories.first()  # ✅ 첫 번째 카테고리 자동 선택 (없으면 기본값)
 
-        try:
-            category = Category.objects.get(name=category_name)
-        except Category.DoesNotExist:
-            return Response({"error": "유효하지 않은 카테고리입니다."}, status=status.HTTP_400_BAD_REQUEST)
-
+        # ✅ 게시물 생성
         post = Post.objects.create(
-            author=request.user,
+            author=user,
             title=title,
             category=category,
             subject=subject,
@@ -167,8 +175,6 @@ class PostCreateView(CreateAPIView):
 
         serializer = PostSerializer(post)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-
-
 
 class PostMyView(ListAPIView):
     """
