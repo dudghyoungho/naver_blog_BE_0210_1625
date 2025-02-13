@@ -1,6 +1,6 @@
 from .profile import ProfileSerializer,UrlnameUpdateSerializer
 from .signup import SignupSerializer
-from .post import PostSerializer,PostImageSerializer,PostTextSerializer
+from .post import PostSerializer,PostImageSerializer
 from .comment import CommentSerializer
 from .heart import HeartSerializer
 from .commentHeart import CommentHeartSerializer

@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
-from ..models import Post, PostText, PostImage,CustomUser,Profile
+from ..models import Post, PostImage,CustomUser,Profile
 from ..models.neighbor import Neighbor
 from django.db.models import Q
 from ..serializers import PostSerializer
@@ -119,27 +119,26 @@ class PostListView(ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
 class PostCreateView(CreateAPIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser]  # ✅ POST 요청에서 multipart/form-data 처리
+    parser_classes = [MultiPartParser, FormParser]
     serializer_class = PostSerializer
 
     @swagger_auto_schema(
         operation_summary="게시물 생성 (multipart/form-data 사용)",
-        operation_description="게시물을 생성할 때 JSON 데이터와 이미지를 함께 업로드할 수 있습니다.",
+        operation_description="게시물을 생성할 때 HTML 본문과 이미지를 함께 업로드할 수 있습니다.",
         manual_parameters=[
             openapi.Parameter('title', openapi.IN_FORM, description='게시물 제목', type=openapi.TYPE_STRING, required=True),
             openapi.Parameter('category', openapi.IN_FORM, description='카테고리', type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('subject', openapi.IN_FORM, description='주제 (네이버 제공 소주제)', type=openapi.TYPE_STRING, enum=[choice[0] for choice in Post.SUBJECT_CHOICES], required=False),
-            openapi.Parameter('visibility', openapi.IN_FORM, description='공개 범위', type=openapi.TYPE_STRING, enum=['everyone', 'mutual', 'me'], required=False),
-            openapi.Parameter('is_complete', openapi.IN_FORM, description='작성 상태', type=openapi.TYPE_BOOLEAN, enum=['true', 'false'], required=False),
-            openapi.Parameter('texts', openapi.IN_FORM, description='텍스트 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('fonts', openapi.IN_FORM, description='글씨체 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('font_sizes', openapi.IN_FORM, description='글씨 크기 배열 (JSON 형식 문자열)',
-                              type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('is_bolds', openapi.IN_FORM, description='글씨 굵기 배열 (JSON 형식 문자열)',
-                              type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('images', openapi.IN_FORM, description='이미지 파일 배열', type=openapi.TYPE_ARRAY, items=openapi.Items(type=openapi.TYPE_FILE), required=False),
+            openapi.Parameter('subject', openapi.IN_FORM, description='주제 (네이버 제공 소주제)', type=openapi.TYPE_STRING,
+                              enum=[choice[0] for choice in Post.SUBJECT_CHOICES], required=False),
+            openapi.Parameter('visibility', openapi.IN_FORM, description='공개 범위', type=openapi.TYPE_STRING,
+                              enum=['everyone', 'mutual', 'me'], required=False),
+            openapi.Parameter('is_complete', openapi.IN_FORM, description='작성 상태', type=openapi.TYPE_BOOLEAN, required=False),
+            openapi.Parameter('content', openapi.IN_FORM, description='HTML 본문 (contenteditable 저장값)', type=openapi.TYPE_STRING, required=True),
+            openapi.Parameter('images', openapi.IN_FORM, description='이미지 파일 배열', type=openapi.TYPE_ARRAY,
+                              items=openapi.Items(type=openapi.TYPE_FILE), required=False),
             openapi.Parameter('captions', openapi.IN_FORM, description='이미지 캡션 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
             openapi.Parameter('is_representative', openapi.IN_FORM, description='대표 사진 여부 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
         ],
@@ -150,45 +149,37 @@ class PostCreateView(CreateAPIView):
         category = request.data.get('category')
         subject = request.data.get('subject', '주제 선택 안 함')
         visibility = request.data.get('visibility', 'everyone')
-        is_complete = to_boolean(request.data.get('is_complete', False))
+        is_complete = request.data.get('is_complete') == 'true'  # Boolean 변환
+        content = request.data.get('content', '')
 
-        # JSON 문자열을 리스트로 변환하는 함수
+        if not title:
+            return Response({"error": "title은 필수 항목입니다."}, status=400)
+
+        # JSON 파싱 함수
         def parse_json_field(field):
             if field:
                 try:
-                    return json.loads(field)  # ✅ JSON 문자열을 리스트로 변환
+                    return json.loads(field)
                 except json.JSONDecodeError:
                     return []
             return []
 
-        texts = parse_json_field(request.data.get('texts'))
-        fonts = parse_json_field(request.data.get('fonts'))
-        font_sizes = parse_json_field(request.data.get('font_sizes'))
-        is_bolds = parse_json_field(request.data.get('is_bolds'))
         captions = parse_json_field(request.data.get('captions'))
         is_representative_flags = parse_json_field(request.data.get('is_representative'))
         images = request.FILES.getlist('images', [])
 
-        if not title:  # title만 필수 항목으로 유지
-            return Response({"error": "title은 필수 항목입니다."}, status=400)
-
+        # ✅ 게시물 생성
         post = Post.objects.create(
             author=request.user,
             title=title,
             category=category,
             subject=subject,
             visibility=visibility,
-            is_complete=is_complete
+            is_complete=is_complete,
+            content=content  # ✅ HTML 저장
         )
 
-        # 텍스트 저장 (글씨체, 크기, 굵기 포함)
-        for idx, text in enumerate(texts):
-            font = fonts[idx] if idx < len(fonts) else "nanum_gothic"
-            font_size = font_sizes[idx] if idx < len(font_sizes) else 15
-            is_bold = is_bolds[idx] if idx < len(is_bolds) else False
-            PostText.objects.create(post=post, content=text, font=font, font_size=font_size, is_bold=is_bold)
-
-        # 이미지 저장
+        # ✅ 이미지 저장
         created_images = []
         for idx, image in enumerate(images):
             caption = captions[idx] if idx < len(captions) else None
@@ -201,10 +192,19 @@ class PostCreateView(CreateAPIView):
             )
             created_images.append(post_image)
 
+        # ✅ 대표사진이 없다면 첫 번째 이미지를 대표로 설정
         if not any(img.is_representative for img in created_images) and created_images:
             created_images[0].is_representative = True
             created_images[0].save()
 
+        # ✅ `content` 내 이미지 태그의 src 속성을 서버 URL로 업데이트
+        for post_image in created_images:
+            image_url = post_image.image.url
+            content = content.replace(f'src="{post_image.image.name}"', f'src="{image_url}"')
+
+        # ✅ 게시물 업데이트 (이미지 URL이 반영된 HTML)
+        post.content = content
+        post.save()
 
         serializer = PostSerializer(post)
         if is_complete:
@@ -212,10 +212,11 @@ class PostCreateView(CreateAPIView):
         else:
             return Response({"message": "게시물이 임시 저장되었습니다.", "post": serializer.data}, status=201)
 
+
 class PostMyView(ListAPIView):
     """
-    로그인된 유저가 작성한 모든 게시물 목록을 조회하는 API
-    쿼리 파라미터로 category와 pk를 통해 필터링 가능
+    ✅ 로그인한 사용자가 작성한 모든 게시물 목록을 조회하는 API
+    - 쿼리 파라미터: category / pk로 필터링 가능
     """
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
@@ -225,14 +226,14 @@ class PostMyView(ListAPIView):
         category = self.request.query_params.get('category', None)
         pk = self.request.query_params.get('pk', None)
 
-        # ✅ 로그인된 유저가 작성한 게시물 중 is_complete=True인 게시물만 조회
+        # ✅ 본인이 작성한 게시물 + 완성된 게시물만 조회
         queryset = Post.objects.filter(author=user, is_complete=True)
 
-        # 'category' 파라미터가 있으면 해당 카테고리로 필터링
+        # ✅ 'category'로 필터링
         if category:
             queryset = queryset.filter(category=category)
 
-        # 'pk' 파라미터가 있으면 해당 게시물 ID로 필터링
+        # ✅ 특정 pk의 게시물 조회
         if pk:
             queryset = queryset.filter(pk=pk)
 
@@ -240,7 +241,8 @@ class PostMyView(ListAPIView):
 
     @swagger_auto_schema(
         operation_summary="내가 작성한 게시물 목록 조회",
-        operation_description="로그인된 유저가 작성한 모든 게시물 목록을 반환합니다. 쿼리 파라미터로 category와 pk를 통해 필터링 가능합니다.",
+        operation_description="로그인된 사용자가 작성한 모든 게시물 목록을 반환합니다. "
+                              "쿼리 파라미터를 이용해 category와 pk로 필터링할 수 있습니다.",
         responses={200: PostSerializer(many=True)},
         manual_parameters=[
             openapi.Parameter(
@@ -264,53 +266,50 @@ class PostMyView(ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+
 class PostMyDetailView(RetrieveAPIView):
     """
-    로그인된 유저가 작성한 특정 게시물의 상세 정보를 조회하는 API
-    쿼리 파라미터가 아닌 게시물 ID로만 조회 가능
+    ✅ 로그인한 사용자가 작성한 특정 게시물의 상세 정보를 조회하는 API
+    - 게시물 ID(`pk`)로 조회
     """
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
-    queryset = Post.objects.all()  # 기본적인 Post 객체 조회
-    parser_classes = [MultiPartParser, FormParser]  # 필요시 추가
-
-    swagger_fake_view = True  # Swagger 문서 생성을 위한 가짜 뷰 추가
+    queryset = Post.objects.all()
 
     def get_object(self):
         user = self.request.user
         pk = self.kwargs.get('pk')
 
-        if pk is None:
+        if not pk:
             raise NotFound("게시물 ID가 필요합니다.")
 
         return get_object_or_404(Post, author=user, pk=pk, is_complete=True)
 
     @swagger_auto_schema(
         operation_summary="내가 작성한 게시물 상세 조회",
-        operation_description="로그인된 유저가 작성한 특정 게시물의 상세 정보를 조회합니다.",
+        operation_description="로그인한 사용자가 특정 게시물의 상세 정보를 조회합니다.",
         responses={200: PostSerializer()},
         manual_parameters=[
             openapi.Parameter(
                 'id',
                 openapi.IN_PATH,
-                description="게시물 ID를 입력합니다.",
+                description="게시물 ID",
                 required=True,
                 type=openapi.TYPE_INTEGER
             )
         ]
     )
     def get(self, request, *args, **kwargs):
-        """
-        GET 메서드로 게시물의 상세 정보를 조회하는 로직
-        """
-        instance = self.get_object()  # QuerySet이 아닌 단일 객체 반환
+        instance = self.get_object()
         serializer = self.get_serializer(instance)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-class PostMutualView(ListAPIView):
 
+class PostMutualView(ListAPIView):
     """
-        최근 1주일 내 작성된 서로 이웃 공개 게시물을 조회
+    ✅ 최근 1주일 내 작성된 '서로 이웃 공개' 게시물을 조회하는 API
+    - `visibility='mutual'` 또는 `visibility='everyone'`인 게시물만 조회
+    - **본인 게시물 제외**
     """
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
@@ -326,22 +325,24 @@ class PostMutualView(ListAPIView):
             Neighbor.objects.filter(to_user=user, status="accepted").values_list('from_user', flat=True)
         )
         neighbor_ids = set(from_neighbors + to_neighbors)
-        neighbor_ids.discard(user.id)
+        neighbor_ids.discard(user.id)  # ✅ 본인 ID 제거
 
-        mutual_neighbor_posts = Q(author_id__in=neighbor_ids) & (Q(visibility='mutual') | Q(visibility='everyone'))
-
+        # ✅ 최근 1주일 이내 작성된 글만 조회
         one_week_ago = now() - timedelta(days=7)
 
-        # ✅ 최근 1주일 이내 작성된 서로 이웃의 게시물만 반환
+        # ✅ 서로이웃 + 전체 공개 글만 필터링
         queryset = Post.objects.filter(
-            mutual_neighbor_posts & Q(is_complete=True) & Q(created_at__gte=one_week_ago)
+            Q(author_id__in=neighbor_ids) &  # 서로이웃이 작성한 글
+            (Q(visibility='mutual') | Q(visibility='everyone')) &  # '서로이웃 공개' or '전체 공개'
+            Q(is_complete=True) &  # ✅ 작성 완료된 글만
+            Q(created_at__gte=one_week_ago)  # 최근 7일 이내
         )
 
         return queryset
 
     @swagger_auto_schema(
-        operation_summary="서로 이웃 게시물 목록",
-        operation_description="최근 1주일 내 작성된 서로 이웃 공개 게시물을 조회합니다.",
+        operation_summary="서로이웃 게시물 목록 조회",
+        operation_description="최근 1주일 내 작성된 서로이웃 공개 게시물을 조회합니다.",
         responses={200: PostSerializer(many=True)}
     )
     def list(self, request, *args, **kwargs):
