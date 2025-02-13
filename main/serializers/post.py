@@ -9,7 +9,7 @@ class PostImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PostImage
-        fields = ['id', 'image', 'image_url', 'created_at']
+        fields = ['id', 'image', 'image_url']
 
     def get_image_url(self, obj):
         return obj.image.url if obj.image else None

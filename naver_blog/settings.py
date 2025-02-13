@@ -63,7 +63,7 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS","PATCH"]
 
 ROOT_URLCONF = 'naver_blog.urls'
 
@@ -92,7 +92,7 @@ WSGI_APPLICATION = 'naver_blog.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'naver_blog_4',
+        'NAME': 'naver_blog',
         'USER': 'root',
         'PASSWORD': 'syhhana1234',
         'HOST': 'localhost',

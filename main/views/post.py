@@ -120,97 +120,54 @@ class PostListView(ListAPIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+def parse_json_field(field):
+    """JSON 문자열을 리스트로 변환하는 함수"""
+    if field:
+        try:
+            return json.loads(field)
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
 class PostCreateView(CreateAPIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
     serializer_class = PostSerializer
 
     @swagger_auto_schema(
-        operation_summary="게시물 생성 (multipart/form-data 사용)",
-        operation_description="게시물을 생성할 때 HTML 본문과 이미지를 함께 업로드할 수 있습니다.",
-        manual_parameters=[
-            openapi.Parameter('title', openapi.IN_FORM, description='게시물 제목', type=openapi.TYPE_STRING, required=True),
-            openapi.Parameter('category', openapi.IN_FORM, description='카테고리', type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('subject', openapi.IN_FORM, description='주제 (네이버 제공 소주제)', type=openapi.TYPE_STRING,
-                              enum=[choice[0] for choice in Post.SUBJECT_CHOICES], required=False),
-            openapi.Parameter('visibility', openapi.IN_FORM, description='공개 범위', type=openapi.TYPE_STRING,
-                              enum=['everyone', 'mutual', 'me'], required=False),
-            openapi.Parameter('is_complete', openapi.IN_FORM, description='작성 상태', type=openapi.TYPE_BOOLEAN, required=False),
-            openapi.Parameter('content', openapi.IN_FORM, description='HTML 본문 (contenteditable 저장값)', type=openapi.TYPE_STRING, required=True),
-            openapi.Parameter('images', openapi.IN_FORM, description='이미지 파일 배열', type=openapi.TYPE_ARRAY,
-                              items=openapi.Items(type=openapi.TYPE_FILE), required=False),
-            openapi.Parameter('captions', openapi.IN_FORM, description='이미지 캡션 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
-            openapi.Parameter('is_representative', openapi.IN_FORM, description='대표 사진 여부 배열 (JSON 형식 문자열)', type=openapi.TYPE_STRING, required=False),
-        ],
+        operation_summary="게시물 생성",
+        operation_description="카테고리와 주제를 포함하여 게시물을 생성합니다.",
         responses={201: PostSerializer()},
     )
     def post(self, request, *args, **kwargs):
-        title = request.data.get('title')
-        category = request.data.get('category')
+        category_name = request.data.get('category')
         subject = request.data.get('subject', '주제 선택 안 함')
-        visibility = request.data.get('visibility', 'everyone')
-        is_complete = request.data.get('is_complete') == 'true'  # Boolean 변환
+        title = request.data.get('title')
         content = request.data.get('content', '')
 
         if not title:
-            return Response({"error": "title은 필수 항목입니다."}, status=400)
+            return Response({"error": "제목은 필수 항목입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # JSON 파싱 함수
-        def parse_json_field(field):
-            if field:
-                try:
-                    return json.loads(field)
-                except json.JSONDecodeError:
-                    return []
-            return []
+        if not category_name:
+            return Response({"error": "카테고리는 필수 항목입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        captions = parse_json_field(request.data.get('captions'))
-        is_representative_flags = parse_json_field(request.data.get('is_representative'))
-        images = request.FILES.getlist('images', [])
+        try:
+            category = Category.objects.get(name=category_name)
+        except Category.DoesNotExist:
+            return Response({"error": "유효하지 않은 카테고리입니다."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # ✅ 게시물 생성
         post = Post.objects.create(
             author=request.user,
             title=title,
             category=category,
             subject=subject,
-            visibility=visibility,
-            is_complete=is_complete,
-            content=content  # ✅ HTML 저장
+            content=content
         )
 
-        # ✅ 이미지 저장
-        created_images = []
-        for idx, image in enumerate(images):
-            caption = captions[idx] if idx < len(captions) else None
-            is_representative = is_representative_flags[idx] if idx < len(is_representative_flags) else False
-            post_image = PostImage.objects.create(
-                post=post,
-                image=image,
-                caption=caption,
-                is_representative=is_representative
-            )
-            created_images.append(post_image)
-
-        # ✅ 대표사진이 없다면 첫 번째 이미지를 대표로 설정
-        if not any(img.is_representative for img in created_images) and created_images:
-            created_images[0].is_representative = True
-            created_images[0].save()
-
-        # ✅ `content` 내 이미지 태그의 src 속성을 서버 URL로 업데이트
-        for post_image in created_images:
-            image_url = post_image.image.url
-            content = content.replace(f'src="{post_image.image.name}"', f'src="{image_url}"')
-
-        # ✅ 게시물 업데이트 (이미지 URL이 반영된 HTML)
-        post.content = content
-        post.save()
-
         serializer = PostSerializer(post)
-        if is_complete:
-            return Response({"message": "게시물이 성공적으로 생성되었습니다.", "post": serializer.data}, status=201)
-        else:
-            return Response({"message": "게시물이 임시 저장되었습니다.", "post": serializer.data}, status=201)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
 
 
 class PostMyView(ListAPIView):
