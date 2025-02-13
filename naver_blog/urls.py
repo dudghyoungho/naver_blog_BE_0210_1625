@@ -21,8 +21,10 @@ from django.conf.urls.static import static
 from main.views.signup import SignupView
 from main.views.login import LoginView
 from main.views.logout import LogoutView
+from main.views.account import PasswordUpdateView
 from main.views.profile import ProfileDetailView, ProfilePublicView, ProfileUrlnameUpdateView
 from main.views.post import PostDetailView,PostMyView,PostMyDetailView,PostMutualView,PostManageView,PostListView,PostCreateView,DraftPostListView,DraftPostDetailView, PostMyCurrentView, PostPublicCurrentView, PostCountView
+from main.views.category import CategoryListView, CategoryDetailView
 from main.views.comment import CommentListView, CommentDetailView
 from main.views.heart import ToggleHeartView, PostHeartUsersView, PostHeartCountView
 from main.views.commentHeart import ToggleCommentHeartView, CommentHeartCountView
@@ -52,6 +54,8 @@ urlpatterns = [
     # ✅ 로그인 및 로그아웃 API
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
+    path('password/update/', PasswordUpdateView.as_view(), name='password-update'),
+
 
     # ✅ 내 프로필 관련 API
     path('profile/me/', ProfileDetailView.as_view(), name='profile-me'),  # 내 프로필 조회, 수정, 삭제
@@ -89,6 +93,10 @@ urlpatterns = [
     path('posts/me/create/', PostCreateView.as_view(), name='post-create'),  # 게시물 생성 (POST)
     path('posts/me/<int:pk>/manage/', PostManageView.as_view(), name='post-manage'),  # 게시물 수정/삭제 (PUT, PATCH, DELETE)
     path('posts/me/current/', PostMyCurrentView.as_view(), name='post-my-current'), # 내가 작성한 게시물 목록 최신 5개 조회
+
+    # 카테고리
+    path('category/', CategoryListView.as_view(), name="category-list"),  # ✅ 목록 조회 & 추가
+    path('category/<int:pk>/', CategoryDetailView.as_view(), name="category-detail"),  # ✅ 조회, 수정, 삭제
 
     # 게시물 개수 세기
     path('posts/count/<str:urlname>/', PostCountView.as_view(), name='post-count'),

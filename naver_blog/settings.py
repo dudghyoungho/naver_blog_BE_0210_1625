@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'django_filters',
     'main',
     'drf_yasg',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
@@ -53,7 +54,16 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
+
+CORS_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:5500",  # Live Server (프론트엔드 실행 주소)
+]
+
+CORS_ALLOW_ALL_ORIGINS = True
+
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 
 ROOT_URLCONF = 'naver_blog.urls'
 
@@ -82,9 +92,9 @@ WSGI_APPLICATION = 'naver_blog.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'naver_blog',
+        'NAME': 'naver_blog_4',
         'USER': 'root',
-        'PASSWORD': '20200129',
+        'PASSWORD': 'syhhana1234',
         'HOST': 'localhost',
         'PORT': '3306',
     }
