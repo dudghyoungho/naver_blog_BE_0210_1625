@@ -23,8 +23,8 @@ from main.views.login import LoginView
 from main.views.logout import LogoutView
 from main.views.account import PasswordUpdateView
 from main.views.profile import ProfileDetailView, ProfilePublicView, ProfileUrlnameUpdateView
-from main.views.post import PostDetailView,PostMyView,PostMyDetailView,PostMutualView,PostManageView,PostListView,PostCreateView,DraftPostListView,DraftPostDetailView, PostMyCurrentView, PostPublicCurrentView, PostCountView
-from main.views.category import CategoryListView, CategoryDetailView
+from main.views.post import PostDetailView,PostMyView,PostMyRecentView,PostMyDetailView,PostMutualView,PostManageView,PostListView,PostCreateView,DraftPostListView,DraftPostDetailView, PostMyCurrentView, PostPublicCurrentView, PostCountView
+from main.views.category import CategoryListView, CategoryDetailView, UserCategoryListView
 from main.views.comment import CommentListView, CommentDetailView
 from main.views.heart import ToggleHeartView, PostHeartUsersView, PostHeartCountView
 from main.views.commentHeart import ToggleCommentHeartView, CommentHeartCountView
@@ -93,10 +93,12 @@ urlpatterns = [
     path('posts/me/create/', PostCreateView.as_view(), name='post-create'),  # 게시물 생성 (POST)
     path('posts/me/<int:pk>/manage/', PostManageView.as_view(), name='post-manage'),  # 게시물 수정/삭제 (PUT, PATCH, DELETE)
     path('posts/me/current/', PostMyCurrentView.as_view(), name='post-my-current'), # 내가 작성한 게시물 목록 최신 5개 조회
+    path('posts/me/recent/', PostMyRecentView.as_view(), name='post-my-recent'), #내가 작성한 게시물 중 제일 최근 게시물 1개 조회
 
     # 카테고리
     path('category/', CategoryListView.as_view(), name="category-list"),  # ✅ 목록 조회 & 추가
     path('category/<int:pk>/', CategoryDetailView.as_view(), name="category-detail"),  # ✅ 조회, 수정, 삭제
+    path('user-categories/', UserCategoryListView.as_view(), name='user-category-list'), # 로그인한 자신의 카테고리 리스트 반환
 
     # 게시물 개수 세기
     path('posts/count/<str:urlname>/', PostCountView.as_view(), name='post-count'),
@@ -137,7 +139,6 @@ urlpatterns = [
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),  # ReDoc UI 추가
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
-
 ]
 
 # 미디어 파일 처리 (개발 환경에서만)

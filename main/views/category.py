@@ -6,6 +6,9 @@ from main.models.category import Category
 from main.serializers.category import CategorySerializer
 from drf_yasg.utils import swagger_auto_schema  # ✅ Swagger 추가
 from drf_yasg import openapi  # ✅ Swagger 문서 필드 설정
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import IsAuthenticated
+
 
 class CategoryListView(generics.ListCreateAPIView):
     """
@@ -96,3 +99,21 @@ class CategoryDetailView(generics.RetrieveUpdateDestroyAPIView):
             return Response({"error": "⚠️ '게시판' 카테고리는 삭제할 수 없습니다."}, status=status.HTTP_403_FORBIDDEN)
         self.perform_destroy(instance)
         return Response({"message": "카테고리가 삭제되었습니다."}, status=status.HTTP_204_NO_CONTENT)
+
+class UserCategoryListView(ListAPIView):
+    """
+    ✅ 사용자의 등록된 카테고리 조회 (GET /user-categories/)
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = CategorySerializer
+
+    @swagger_auto_schema(
+        operation_summary="사용자 카테고리 조회",
+        operation_description="사용자가 등록한 카테고리 목록을 조회합니다.",
+        responses={200: CategorySerializer(many=True)}
+    )
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        categories = user.categories.all()  # ✅ CustomUser의 categories 사용
+        serializer = self.get_serializer(categories, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

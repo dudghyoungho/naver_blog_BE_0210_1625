@@ -17,7 +17,10 @@ from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now, timedelta
 from pickle import FALSE
+from main.utils import *
+from ..utils.saveimageutil import save_images_from_request
 
+#from main.utils.*
 
 def to_boolean(value):
     """
@@ -34,6 +37,11 @@ def to_boolean(value):
 
 
 class PostListView(ListAPIView):
+    """
+    ✅ 게시물 목록 조회 API
+    - 서로이웃 공개 글과 전체 공개 글을 조회할 수 있음
+    - 쿼리 파라미터: urlname, category_name, pk, keyword로 필터링 가능
+    """
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser]
     queryset = Post.objects.all()
@@ -41,69 +49,83 @@ class PostListView(ListAPIView):
 
     def get_queryset(self):
         urlname = self.request.query_params.get('urlname', None)
-        category = self.request.query_params.get('category', None)
+        category_name = self.request.query_params.get('category_name', None)
         pk = self.request.query_params.get('pk', None)
         keyword = self.request.query_params.get('keyword', None)
 
-        # ✅ category만 존재할 경우 에러 처리
-        if category and not (urlname or pk):
+        # ✅ category_name만 존재할 경우 에러 처리
+        if category_name and not (urlname or pk):
             raise ValidationError("카테고리만 입력된 경우는 허용하지 않습니다.")
 
         # ✅ keyword는 단독으로 사용해야 함
-        if keyword and (urlname or category or pk):
+        if keyword and (urlname or category_name or pk):
             raise ValidationError("keyword는 단독으로 사용해야 합니다.")
 
-        user = self.request.user
+        request_user = self.request.user  # ✅ API 요청을 보낸 유저 (예: sm)
+        profile_user = None  # ✅ urlname을 통한 조회 유저 (예: kdy)
 
+        # ✅ `urlname`이 주어진 경우, Profile에서 해당 `urlname`을 가진 유저 찾기
         if urlname:
-            try:
-                profile = Profile.objects.get(urlname=urlname)
-                user = profile.user
-            except Profile.DoesNotExist:
-                return Post.objects.none()
+            profile = Profile.objects.filter(urlname=urlname).select_related("user").first()
+            if not profile:
+                return Post.objects.none()  # 존재하지 않는 경우 빈 쿼리셋 반환
+            profile_user = profile.user  # ✅ Profile의 `user`를 사용
+        else:
+            profile_user = request_user  # ✅ urlname이 없으면 기본적으로 API 요청한 유저 사용
 
-        # ✅ keyword가 주어진 경우, 해당 카테고리의 게시물만 필터링
+        # ✅ keyword가 주어진 경우, 해당 키워드의 게시물만 필터링
         if keyword:
             if keyword not in dict(Post.KEYWORD_CHOICES):
                 raise ValidationError(f"'{keyword}'은(는) 유효하지 않은 keyword 값입니다.")
-            return Post.objects.filter(keyword=keyword, is_complete=True).exclude(
-                author=user)  # ❌ 본인 게시물 제외
+            queryset = Post.objects.filter(keyword=keyword, status="published", user=profile_user)
+            return queryset
 
-        # ❌ 자신의 게시물(my_posts) 제외
-        from_neighbors = list(
-            Neighbor.objects.filter(from_user=user, status="accepted").values_list('to_user', flat=True)
-        )
-        to_neighbors = list(
-            Neighbor.objects.filter(to_user=user, status="accepted").values_list('from_user', flat=True)
-        )
-        neighbor_ids = set(from_neighbors + to_neighbors)
-        neighbor_ids.discard(user.id)  # ❌ 자신의 ID 제거
+        # ✅ `profile_user`가 작성한 모든 `published` 게시물 가져오기
+        queryset = Post.objects.filter(user=profile_user, status="published")
 
-        mutual_neighbor_posts = Q(visibility='mutual', author_id__in=neighbor_ids)  # ✅ 서로 이웃의 'mutual' 공개 글
-        public_posts = Q(visibility='everyone')  # ✅ 전체 공개 글
+        # ✅ `category_name`을 이용해 ForeignKey `category` 필터링
+        if category_name:
+            try:
+                category = Category.objects.get(name=category_name)  # 🔹 문자열로 받은 이름을 Category 모델에서 조회
+                queryset = queryset.filter(category=category)
+            except Category.DoesNotExist:
+                return Post.objects.none()  # 존재하지 않는 카테고리일 경우 빈 쿼리셋 반환
 
-        queryset = Post.objects.filter(
-            (public_posts | mutual_neighbor_posts) & Q(is_complete=True)  # ✅ 자신의 글 제외
-        ).exclude(author=user)  # ❌ 본인 게시물 확실하게 제거
-
-        if category:
-            queryset = queryset.filter(category=category)
-
+        # ✅ 특정 `pk`의 게시물 조회
         if pk:
             queryset = queryset.filter(pk=pk)
-
         return queryset
 
     @swagger_auto_schema(
         operation_summary="게시물 목록 조회",
-        operation_description="서로이웃 공개인 글과, 전체 공개 글을 조회할 수 있습니다. 쿼리 파라미터 urlname, category, pk, keyword로 필터링 가능합니다.",
+        operation_description="서로이웃 공개인 글과, 전체 공개 글을 조회할 수 있습니다. "
+                              "쿼리 파라미터 urlname, category_name, pk, keyword로 필터링 가능합니다.",
         manual_parameters=[
-            openapi.Parameter('urlname', openapi.IN_QUERY, description="조회할 사용자의 고유 ID", required=False, type=openapi.TYPE_STRING),
-            openapi.Parameter('category', openapi.IN_QUERY, description="조회할 게시물 카테고리", required=False, type=openapi.TYPE_STRING),
-            openapi.Parameter('pk', openapi.IN_QUERY, description="조회할 게시물 ID", required=False, type=openapi.TYPE_INTEGER),
-            openapi.Parameter('keyword', openapi.IN_QUERY, description="조회할 주제 키워드 (단독 사용 가능)",
-                              required=False, type=openapi.TYPE_STRING,
-                              enum=[choice[0] for choice in Post.KEYWORD_CHOICES]),
+            openapi.Parameter(
+                'urlname', openapi.IN_QUERY,
+                description="조회할 사용자의 URL 이름",
+                required=False,
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'category_name', openapi.IN_QUERY,
+                description="조회할 게시물 카테고리 이름",
+                required=False,
+                type=openapi.TYPE_STRING
+            ),
+            openapi.Parameter(
+                'pk', openapi.IN_QUERY,
+                description="조회할 게시물 ID",
+                required=False,
+                type=openapi.TYPE_INTEGER
+            ),
+            openapi.Parameter(
+                'keyword', openapi.IN_QUERY,
+                description="조회할 주제 키워드 (단독 사용 가능)",
+                required=False,
+                type=openapi.TYPE_STRING,
+                enum=[choice[0] for choice in getattr(Post, 'KEYWORD_CHOICES', [])]  # ✅ `getattr()`로 안전 처리
+            ),
         ],
         responses={200: PostSerializer(many=True)}
     )
@@ -119,67 +141,71 @@ class PostListView(ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
-def parse_json_field(field):
-    """JSON 문자열을 리스트로 변환하는 함수"""
-    if field:
-        try:
-            return json.loads(field)
-        except json.JSONDecodeError:
-            return []
-    return []
-
-
 class PostCreateView(CreateAPIView):
     """
     게시물 생성 뷰
-    - 사용자의 CustomUser 모델에 등록된 카테고리 중에서만 선택 가능
+    - 사용자의 CustomUser 모델에 등록된 카테고리 중에서 카테고리 '이름'으로만 선택 가능
     """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
     serializer_class = PostSerializer
 
+
     @swagger_auto_schema(
         operation_summary="게시물 생성",
-        operation_description="사용자의 카테고리 중에서 선택해 게시물을 생성합니다.",
+        operation_description="사용자의 카테고리 중에서 '이름'으로 선택해 게시물을 생성합니다.",
         responses={201: PostSerializer()},
     )
     def post(self, request, *args, **kwargs):
-        user = request.user
+        user = request.user  # ✅ 변경된 부분
         title = request.data.get('title')
-        category_name = request.data.get('category_name')  # 카테고리 이름으로 선택
+        category_name = request.data.get('category_name')  # ✅ 카테고리 이름으로 선택
         subject = request.data.get('subject', '주제 선택 안 함')
         content = request.data.get('content', '')
+        post_status = request.data.get('status', 'draft')# ✅ Post 모델의 status 사용
+        visibility = request.data.get('visibility', 'everyone')  # ✅ visibility 추가
+        created_at = request.data.get('created_at')  # ✅ created_at 추가
 
-        # ✅ 제목 필수 확인
         if not title:
-            return Response({"error": "제목은 필수 항목입니다."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "제목은 필수 항목입니다."}, status=400)
 
-        # ✅ 카테고리 선택: 사용자의 CustomUser.categories에서만 선택 가능
         if category_name:
             try:
-                category = user.categories.get(name=category_name)
+                category = user.categories.get(name=category_name)  # ✅ 변경된 부분
             except Category.DoesNotExist:
-                return Response({"error": "유효하지 않은 카테고리입니다."}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": f"'{category_name}'은(는) 유효하지 않은 카테고리입니다."}, status=400)
         else:
-            category = user.categories.first()  # ✅ 첫 번째 카테고리 자동 선택 (없으면 기본값)
+            category = user.categories.first()  # ✅ 변경된 부분
 
-        # ✅ 게시물 생성
         post = Post.objects.create(
-            author=user,
+            user=user,  # ✅ 변경된 부분
             title=title,
             category=category,
             subject=subject,
-            content=content
+            content=content,
+            status=post_status,
+            visibility = visibility,
+            created_at = created_at or timezone.now()  # 기본값 설정
         )
 
+        # 이미지 저장 saveimageutil 함수를 불러와서 적용한다.
+        # 작업 내용 : 다중 이미지 저장, 캡션, 대표사진 여부 저장, BASE64 인코딩 후 url 변경
+        save_images_from_request(post, request)
+
         serializer = PostSerializer(post)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+        if post_status == 'published':
+            return Response({"message": "게시물이 성공적으로 생성되었습니다.", "post": serializer.data}, status=201)
+        elif post_status == 'draft':
+            return Response({"message": "게시물이 임시 저장되었습니다.", "post": serializer.data}, status=201)
+        else:
+            return Response({"error": "게시물 상태가 유효하지 않습니다."}, status=400)
+
 
 class PostMyView(ListAPIView):
     """
     ✅ 로그인한 사용자가 작성한 모든 게시물 목록을 조회하는 API
-    - 쿼리 파라미터: category / pk로 필터링 가능
+    - 쿼리 파라미터: category_name / pk로 필터링 가능
     """
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
@@ -189,10 +215,10 @@ class PostMyView(ListAPIView):
         category = self.request.query_params.get('category', None)
         pk = self.request.query_params.get('pk', None)
 
-        # ✅ 본인이 작성한 게시물 + 완성된 게시물만 조회
-        queryset = Post.objects.filter(author=user, is_complete=True)
+        # ✅ 본인이 작성한 `published` 상태의 게시물만 조회
+        queryset = Post.objects.filter(user=user, status="published")
 
-        # ✅ 'category'로 필터링
+        # ✅ 'category_name'으로 필터링
         if category:
             queryset = queryset.filter(category=category)
 
@@ -211,7 +237,7 @@ class PostMyView(ListAPIView):
             openapi.Parameter(
                 'category',
                 openapi.IN_QUERY,
-                description="게시물의 카테고리로 필터링합니다. 예: 'Travel', 'Food' 등.",
+                description="게시물의 카테고리 이름으로 필터링합니다. 예: 'Travel', 'Food' 등.",
                 required=False,
                 type=openapi.TYPE_STRING
             ),
@@ -229,7 +255,6 @@ class PostMyView(ListAPIView):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
 class PostMyDetailView(RetrieveAPIView):
     """
     ✅ 로그인한 사용자가 작성한 특정 게시물의 상세 정보를 조회하는 API
@@ -246,7 +271,7 @@ class PostMyDetailView(RetrieveAPIView):
         if not pk:
             raise NotFound("게시물 ID가 필요합니다.")
 
-        return get_object_or_404(Post, author=user, pk=pk, is_complete=True)
+        return get_object_or_404(Post, user=user, pk=pk, status="published")
 
     @swagger_auto_schema(
         operation_summary="내가 작성한 게시물 상세 조회",
@@ -267,6 +292,33 @@ class PostMyDetailView(RetrieveAPIView):
         serializer = self.get_serializer(instance)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+class PostMyRecentView(RetrieveAPIView):
+    """
+    ✅ 로그인한 사용자가 작성한 게시물 중 가장 최근 `published` 상태인 게시물 조회 API
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = PostSerializer
+
+    def get_object(self):
+        user = self.request.user
+
+        # 현재 로그인한 사용자의 `published` 상태인 게시물 중 가장 최신(created_at 기준) 1개 가져오기
+        post = Post.objects.filter(user=user, status='published').order_by('-created_at').first()
+
+        if not post:
+            raise NotFound("출판된 게시물이 없습니다.")
+
+        return post
+
+    @swagger_auto_schema(
+        operation_summary="내가 작성한 가장 최근 게시물 조회",
+        operation_description="로그인한 사용자가 작성한 게시물 중 `published` 상태이며, 가장 최근 생성된 게시물 1개를 조회합니다.",
+        responses={200: PostSerializer()},
+    )
+    def get(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class PostMutualView(ListAPIView):
     """
@@ -615,7 +667,7 @@ class DraftPostDetailView(RetrieveAPIView):
 class PostMyCurrentView(ListAPIView):
     """
     로그인된 유저가 작성한 최신 5개 게시물 목록을 조회하는 API
-    ✅ 로그인된 유저가 작성한 게시물 중 is_complete=True인 게시물만 조회
+    ✅ 로그인된 유저가 작성한 게시물 중 status="published"인 게시물만 조회
     """
     permission_classes = [IsAuthenticated]
     serializer_class = PostSerializer
@@ -623,18 +675,17 @@ class PostMyCurrentView(ListAPIView):
     def get_queryset(self):
         user = self.request.user
         # ✅ is_complete=True 조건 추가
-        return Post.objects.filter(author=user, is_complete=True).order_by('-created_at')[:5]
+        return Post.objects.filter(user=user, status="published").order_by('-created_at')[:5]
 
     @swagger_auto_schema(
         operation_summary="내가 작성한 최근 5개 게시물 조회",
-        operation_description="로그인된 유저가 작성한 게시물 중 is_complete=True인 상태에서 최근 5개만 반환합니다.",
+        operation_description="로그인된 유저가 작성한 게시물 중 status=published인 상태에서 최근 5개만 반환합니다.",
         responses={200: PostSerializer(many=True)}
     )
     def get(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-
 class PostPublicCurrentView(ListAPIView):
     """
     특정 사용자의 최신 5개 게시물을 조회하는 API (서로이웃 여부 고려)
